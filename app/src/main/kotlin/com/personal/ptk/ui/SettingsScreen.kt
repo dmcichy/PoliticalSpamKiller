@@ -42,9 +42,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import com.personal.ptk.App
 import com.personal.ptk.util.InboxPurger
 import com.personal.ptk.util.InboxScanner
+import com.personal.ptk.util.ShizukuHelper
 import com.personal.ptk.util.SmsRoleHelper
 import kotlinx.coroutines.launch
 
@@ -75,11 +82,23 @@ fun SettingsScreen(onBack: () -> Unit) {
         .countPendingPurgeFlow().collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
 
+    var shizukuEnabled by remember {
+        mutableStateOf(app.prefs.getBoolean(App.PREF_SHIZUKU_ENABLED, false))
+    }
+    var shizukuInstalled by remember { mutableStateOf(ShizukuHelper.isInstalled(context)) }
+    var shizukuRunning by remember { mutableStateOf(ShizukuHelper.isRunning()) }
+    var shizukuPermission by remember { mutableStateOf(ShizukuHelper.isPermissionGranted()) }
+    val shizukuActive = shizukuEnabled && shizukuRunning && shizukuPermission
+    var showAutoStartGuide by remember { mutableStateOf(false) }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isDefault = SmsRoleHelper.isDefaultSmsApp(context)
+                shizukuInstalled = ShizukuHelper.isInstalled(context)
+                shizukuRunning = ShizukuHelper.isRunning()
+                shizukuPermission = ShizukuHelper.isPermissionGranted()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -91,21 +110,25 @@ fun SettingsScreen(onBack: () -> Unit) {
         scanResultText = null
         scanProgressText = null
         scope.launch {
-            val result = InboxScanner.scan(context) { current, total, killed ->
-                scanProgressText = "Scanning $current of $total ($killed spam found)"
+            val doScan: suspend () -> Unit = {
+                val result = InboxScanner.scan(context) { current, total, killed ->
+                    scanProgressText = "Scanning $current of $total ($killed spam found)"
+                }
+                val sb = StringBuilder()
+                sb.append("Scanned ${result.scanned} messages. ")
+                sb.append("Found ${result.killed} spam. ")
+                if (result.deleted > 0) sb.append("Deleted ${result.deleted} from inbox. ")
+                if (result.deleteFailed > 0) sb.append("⚠ ${result.deleteFailed} failed to delete! ")
+                sb.append("Inbox: ${result.inboxAfter} remaining.")
+                scanResultText = sb.toString()
             }
-            val sb = StringBuilder()
-            sb.append("Scanned ${result.scanned} messages. ")
-            sb.append("Found ${result.killed} spam. ")
-            if (result.deleted > 0) {
-                sb.append("Deleted ${result.deleted} from inbox. ")
+            if (shizukuActive) {
+                ShizukuHelper.withPtkAsDefault(context) { doScan() }
+            } else {
+                doScan()
             }
-            if (result.deleteFailed > 0) {
-                sb.append("⚠ ${result.deleteFailed} failed to delete! ")
-            }
-            sb.append("Inbox: ${result.inboxAfter} remaining.")
-            scanResultText = sb.toString()
             scanning = false
+            isDefault = SmsRoleHelper.isDefaultSmsApp(context)
         }
     }
 
@@ -114,17 +137,28 @@ fun SettingsScreen(onBack: () -> Unit) {
         purgeResultText = null
         purgeProgressText = null
         scope.launch {
-            val result = InboxPurger.purge(context) { current, total ->
-                purgeProgressText = "Purging $current of $total"
+            val doPurge: suspend () -> Unit = {
+                val result = InboxPurger.purge(
+                    context,
+                    useShizuku = shizukuActive
+                ) { current, total ->
+                    purgeProgressText = "Purging $current of $total"
+                }
+                val sb = StringBuilder()
+                sb.append("Attempted ${result.attempted}. ")
+                sb.append("Deleted ${result.deleted}. ")
+                if (result.notFound > 0) sb.append("${result.notFound} not found. ")
+                if (result.failed > 0) sb.append("⚠ ${result.failed} failed. ")
+                sb.append("Inbox: ${result.inboxAfter} remaining.")
+                purgeResultText = sb.toString()
             }
-            val sb = StringBuilder()
-            sb.append("Attempted ${result.attempted}. ")
-            sb.append("Deleted ${result.deleted}. ")
-            if (result.notFound > 0) sb.append("${result.notFound} not found. ")
-            if (result.failed > 0) sb.append("⚠ ${result.failed} failed. ")
-            sb.append("Inbox: ${result.inboxAfter} remaining.")
-            purgeResultText = sb.toString()
+            if (shizukuActive) {
+                ShizukuHelper.withPtkAsDefault(context) { doPurge() }
+            } else {
+                doPurge()
+            }
             purging = false
+            isDefault = SmsRoleHelper.isDefaultSmsApp(context)
         }
     }
 
@@ -255,10 +289,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("Scan Inbox", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Classifies every SMS already in your inbox and deletes the " +
-                            "political spam. PTK will temporarily become your default " +
-                            "SMS app (Android requires this to delete messages). " +
-                            "After the scan you can switch back to Google Messages above.",
+                        if (shizukuActive)
+                            "Classifies every SMS in your inbox and silently deletes " +
+                                "political spam via Shizuku. No app switching needed."
+                        else
+                            "Classifies every SMS already in your inbox and deletes the " +
+                                "political spam. PTK will temporarily become your default " +
+                                "SMS app (Android requires this to delete messages). " +
+                                "After the scan you can switch back to Google Messages above.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -277,7 +315,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     } else {
                         Button(
                             onClick = {
-                                if (isDefault) {
+                                if (shizukuActive || isDefault) {
                                     runScan()
                                 } else {
                                     pendingAction = "scan"
@@ -289,8 +327,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                if (isDefault) "Scan Inbox Now"
-                                else "Switch to PTK & Scan Inbox"
+                                when {
+                                    shizukuActive -> "Scan Inbox Now"
+                                    isDefault -> "Scan Inbox Now"
+                                    else -> "Switch to PTK & Scan Inbox"
+                                }
                             )
                         }
                     }
@@ -316,9 +357,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.titleSmall
                     )
                     Text(
-                        "Every time PTK catches a spam SMS in real time, it records the " +
-                            "row ID. Tap to delete every recorded spam from your inbox in " +
-                            "one shot. PTK will become default temporarily.",
+                        if (shizukuActive)
+                            "Silently deletes every recorded spam from your inbox " +
+                                "via Shizuku. No app switching needed."
+                        else
+                            "Every time PTK catches a spam SMS in real time, it records the " +
+                                "row ID. Tap to delete every recorded spam from your inbox in " +
+                                "one shot. PTK will become default temporarily.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -345,7 +390,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     } else {
                         Button(
                             onClick = {
-                                if (isDefault) {
+                                if (shizukuActive || isDefault) {
                                     runPurge()
                                 } else {
                                     pendingAction = "purge"
@@ -358,8 +403,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                if (isDefault) "Purge $pendingPurgeCount Spam Now"
-                                else "Switch to PTK & Purge $pendingPurgeCount Spam"
+                                when {
+                                    shizukuActive -> "Purge $pendingPurgeCount Spam Now"
+                                    isDefault -> "Purge $pendingPurgeCount Spam Now"
+                                    else -> "Switch to PTK & Purge $pendingPurgeCount Spam"
+                                }
                             )
                         }
                     }
@@ -372,6 +420,152 @@ fun SettingsScreen(onBack: () -> Unit) {
                             color = if (it.contains("⚠")) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.primary
                         )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Shizuku Power Mode",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        "Enables fully silent SMS deletion without switching your " +
+                            "default SMS app. Requires the Shizuku app to be installed " +
+                            "and running.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Installed", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            if (shizukuInstalled) "Yes" else "No",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (shizukuInstalled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Running", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            if (shizukuRunning) "Yes" else "No",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (shizukuRunning) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Permission", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            if (shizukuPermission) "Granted" else "Not Granted",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (shizukuPermission) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    if (!shizukuInstalled) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/RikkaApps/Shizuku/releases")
+                                )
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Install Shizuku") }
+                    } else if (shizukuRunning && !shizukuPermission) {
+                        Button(
+                            onClick = {
+                                ShizukuHelper.requestPermission()
+                                shizukuPermission = ShizukuHelper.isPermissionGranted()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Grant Permission") }
+                    } else if (!shizukuRunning) {
+                        Button(
+                            onClick = {
+                                try {
+                                    val intent = context.packageManager
+                                        .getLaunchIntentForPackage(
+                                            "moe.shizuku.privileged.api"
+                                        )
+                                    if (intent != null) context.startActivity(intent)
+                                } catch (_: Exception) { }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Open Shizuku") }
+                    }
+
+                    if (shizukuInstalled && shizukuRunning && shizukuPermission) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        SettingToggle(
+                            title = "Enable Power Mode",
+                            subtitle = if (shizukuActive)
+                                "Active. Real-time spam deletion and one-tap " +
+                                    "scan/purge with zero confirmation dialogs."
+                            else "Toggle on to enable silent background SMS deletion.",
+                            checked = shizukuEnabled,
+                            onCheckedChange = {
+                                shizukuEnabled = it
+                                app.prefs.edit()
+                                    .putBoolean(App.PREF_SHIZUKU_ENABLED, it).apply()
+                            }
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showAutoStartGuide = !showAutoStartGuide },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Auto-Start Setup Guide",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            if (showAutoStartGuide) Icons.Default.ExpandLess
+                            else Icons.Default.ExpandMore,
+                            contentDescription = "Toggle guide"
+                        )
+                    }
+                    AnimatedVisibility(visible = showAutoStartGuide) {
+                        Column {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "To have Shizuku start automatically after reboot " +
+                                    "(without root):\n\n" +
+                                    "1. Install the thedjchi Shizuku fork from:\n" +
+                                    "   github.com/thedjchi/Shizuku\n\n" +
+                                    "2. Connect phone to PC and run:\n" +
+                                    "   adb shell pm grant " +
+                                    "moe.shizuku.privileged.api " +
+                                    "android.permission.WRITE_SECURE_SETTINGS\n\n" +
+                                    "3. In Shizuku app settings, enable\n" +
+                                    "   \"Start on boot (wireless ADB)\"\n\n" +
+                                    "4. After reboot, Shizuku starts in ~5 seconds\n" +
+                                    "   (requires Wi-Fi to be connected).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

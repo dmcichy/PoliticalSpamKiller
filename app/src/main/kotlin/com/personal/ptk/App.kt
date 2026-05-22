@@ -52,5 +52,8 @@ class App : Application() {
         const val PREF_RETENTION_DAYS = "vault_retention_days"
         const val PREF_SETUP_COMPLETE = "setup_complete"
         const val PREF_PREVIOUS_SMS_APP = "previous_sms_app"
+        const val PREF_SHIZUKU_ENABLED = "shizuku_enabled"
     }
+
+    fun isShizukuPowerMode(): Boolean = prefs.getBoolean(PREF_SHIZUKU_ENABLED, false)
 }

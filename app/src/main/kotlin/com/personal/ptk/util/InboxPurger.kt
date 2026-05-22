@@ -7,6 +7,7 @@ import android.util.Log
 import com.personal.ptk.App
 import com.personal.ptk.sms.SmsLookup
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 data class PurgeResult(
@@ -30,8 +31,14 @@ object InboxPurger {
     private const val TAG = "InboxPurger"
     private val SMS_URI: Uri = Uri.parse("content://sms")
 
+    /**
+     * @param useShizuku If true, uses Shizuku shell commands to delete
+     *   (caller should have already switched PTK to default via
+     *   [ShizukuHelper.withPtkAsDefault] or the fast-path will be tried).
+     */
     suspend fun purge(
         context: Context,
+        useShizuku: Boolean = false,
         onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
     ): PurgeResult = withContext(Dispatchers.IO) {
         val app = context.applicationContext as App
@@ -56,19 +63,24 @@ object InboxPurger {
                 continue
             }
 
-            try {
-                val rowUri = ContentUris.withAppendedId(SMS_URI, smsId)
-                val rows = context.contentResolver.delete(rowUri, null, null)
-                if (rows > 0) {
-                    deleted++
-                    vaultDao.markScrubbed(entry.id)
-                } else {
-                    failed++
-                    Log.w(TAG, "Delete returned 0 for smsId=$smsId from ${entry.sender}")
+            val success = if (useShizuku) {
+                ShizukuHelper.silentDeleteSms(smsId)
+            } else {
+                try {
+                    val rowUri = ContentUris.withAppendedId(SMS_URI, smsId)
+                    context.contentResolver.delete(rowUri, null, null) > 0
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to delete smsId=$smsId from ${entry.sender}", e)
+                    false
                 }
-            } catch (e: Exception) {
+            }
+
+            if (success) {
+                deleted++
+                vaultDao.markScrubbed(entry.id)
+            } else {
                 failed++
-                Log.e(TAG, "Failed to delete smsId=$smsId from ${entry.sender}", e)
+                Log.w(TAG, "Delete failed for smsId=$smsId from ${entry.sender}")
             }
         }
 

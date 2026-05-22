@@ -11,6 +11,7 @@ import com.personal.ptk.classify.Verdict
 import com.personal.ptk.data.entities.RuleEntry
 import com.personal.ptk.data.entities.RuleType
 import com.personal.ptk.data.entities.VaultEntry
+import com.personal.ptk.util.ShizukuHelper
 import com.personal.ptk.util.SmsRoleHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,30 +66,51 @@ class SmsReceiver : BroadcastReceiver() {
             // Auto-blocklist so subsequent texts from this sender are instant kills
             autoBlockSender(app, sender)
 
-            // Log to vault (scrubbed=false; message is still in Google Messages inbox)
             val vaultDao = app.database.vaultDao()
-            vaultDao.insert(
-                VaultEntry(
-                    sender = sender,
-                    body = body,
-                    timestamp = timestamp,
-                    reason = verdict.reason,
-                    matchedRule = verdict.matchedRule,
-                    scrubbed = false,
-                    smsId = null
-                )
-            )
 
-            // Background poll for the SMS row id so a future Purge can delete it precisely
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
-                if (smsId != null) {
-                    val entry = vaultDao.getAll().firstOrNull {
-                        it.sender == sender && it.body == body && it.timestamp == timestamp
-                    }
-                    if (entry != null) {
-                        vaultDao.setSmsId(entry.id, smsId)
-                        Log.d(TAG, "Tagged vault entry ${entry.id} with smsId=$smsId")
+            if (ShizukuHelper.isActive(app)) {
+                // Shizuku Power Mode: find the SMS ID and delete it silently
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
+                    val deleted = if (smsId != null) {
+                        ShizukuHelper.silentDeleteSms(smsId)
+                    } else false
+                    vaultDao.insert(
+                        VaultEntry(
+                            sender = sender,
+                            body = body,
+                            timestamp = timestamp,
+                            reason = verdict.reason,
+                            matchedRule = verdict.matchedRule,
+                            scrubbed = deleted,
+                            smsId = smsId
+                        )
+                    )
+                    Log.d(TAG, "Shizuku delete smsId=$smsId success=$deleted")
+                }
+            } else {
+                // Standard mode: vault with scrubbed=false, poll for smsId in background
+                vaultDao.insert(
+                    VaultEntry(
+                        sender = sender,
+                        body = body,
+                        timestamp = timestamp,
+                        reason = verdict.reason,
+                        matchedRule = verdict.matchedRule,
+                        scrubbed = false,
+                        smsId = null
+                    )
+                )
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
+                    if (smsId != null) {
+                        val entry = vaultDao.getAll().firstOrNull {
+                            it.sender == sender && it.body == body && it.timestamp == timestamp
+                        }
+                        if (entry != null) {
+                            vaultDao.setSmsId(entry.id, smsId)
+                            Log.d(TAG, "Tagged vault entry ${entry.id} with smsId=$smsId")
+                        }
                     }
                 }
             }

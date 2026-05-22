@@ -66,6 +66,8 @@ dependencies {
     implementation(libs.tflite)
     implementation(libs.workmanager)
     implementation(libs.core.ktx)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     debugImplementation(libs.compose.ui.tooling)
 
