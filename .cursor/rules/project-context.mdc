@@ -1,0 +1,49 @@
+---
+description: Keep the living project context document accurate and complete at all times
+alwaysApply: true
+---
+
+# Keep Project Context Current
+
+The file `.cursor/plans/project-context.md` is the **single source of truth** for this
+project. It must be comprehensive enough that if all chat history were lost, an AI could
+fully understand what this project is, how it works, and what state it is in — solely
+from this file.
+
+## Read It First
+
+At the start of every session, read `.cursor/plans/project-context.md` before doing any work.
+
+## When to Update
+
+After ANY of these changes, update the relevant section of `project-context.md` before
+ending your turn:
+
+- New files or scripts added, renamed, or removed
+- New external system integrations (APIs, databases, services)
+- New database tables, schemas, or stored procedures
+- Changes to orchestration flows (Prefect deployments, schedules)
+- New automation schedules or cron jobs
+- Architectural shifts or design decisions
+- Directory structure changes
+- Credential or secret management changes
+- Files moved to `_archive/`
+
+## What Does NOT Require an Update
+
+- Bug fixes that don't change project scope
+- Comment edits or formatting changes
+- Minor refactors that don't alter architecture or file layout
+
+## How to Update
+
+- Keep the existing section structure — don't reorganize unless asked
+- Be factual and terse — this is a reference doc, not a narrative
+- Update the "Last updated" date when making changes
+- Never delete content without replacing it with the corrected/updated version
+- The file must always be a complete and accurate snapshot of the project
+
+## The Standard
+
+Ask yourself: *"If someone wiped the chat history and opened this project cold, would
+`project-context.md` tell them everything they need to know?"* If not, update it.
