@@ -25,9 +25,8 @@ ptk_dump.bin
 smscap.txt
 *.xml.bak
 
-# Infrastructure docs with credentials
-dmc-inc.com/DMC-INC-INFRASTRUCTURE.md
-dmc-inc.com/*.pdf
+# DMC-INC.COM — separate project
+dmc-inc.com/
 
 # ML training data (contains personal SMS content)
 ml-spam-training/data/
