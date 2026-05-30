@@ -36,4 +36,13 @@ interface RuleDao {
 
     @Query("SELECT COUNT(*) FROM rules WHERE type = :type AND value = :value AND enabled = 1")
     suspend fun countByTypeAndValue(type: RuleType, value: String): Int
+
+    @Query("DELETE FROM rules WHERE type = 'KEYWORD' AND value = :value")
+    suspend fun deleteKeyword(value: String): Int
+
+    @Query("DELETE FROM rules WHERE type = 'BLOCKLIST_NUMBER' AND value = :value")
+    suspend fun deleteFromBlocklist(value: String): Int
+
+    @Query("DELETE FROM rules WHERE type = 'ALLOWLIST_NUMBER' AND value = :value")
+    suspend fun deleteFromAllowlist(value: String): Int
 }

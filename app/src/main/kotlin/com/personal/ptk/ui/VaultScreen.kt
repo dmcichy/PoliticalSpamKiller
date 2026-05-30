@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -71,8 +72,10 @@ fun VaultScreen(onBack: () -> Unit) {
     val app = context.applicationContext as App
     val scope = rememberCoroutineScope()
 
-    val entries by app.database.vaultDao().getAllFlow().collectAsState(initial = emptyList())
+    val entries by app.database.vaultDao().getPendingReviewFlow().collectAsState(initial = emptyList())
+    val purgeCount by app.database.vaultDao().countPendingPurgeFlow().collectAsState(initial = 0)
     var showClearDialog by remember { mutableStateOf(false) }
+    var showRestoreAllDialog by remember { mutableStateOf(false) }
     val lastToast = remember { mutableStateOf<Toast?>(null) }
     fun showToast(msg: String) {
         lastToast.value?.cancel()
@@ -130,28 +133,48 @@ fun VaultScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Spam Vault (${entries.size})") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                },
-                actions = {
-                    if (entries.isNotEmpty()) {
-                        IconButton(onClick = { showClearDialog = true }) {
-                            Icon(Icons.Default.DeleteSweep, "Clear vault")
+            Column {
+                TopAppBar(
+                    title = { Text("Review Vault (${entries.size})") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        }
+                    },
+                    actions = {
+                        if (entries.isNotEmpty()) {
+                            IconButton(onClick = { showRestoreAllDialog = true }) {
+                                Icon(Icons.Default.RestartAlt, "Restore all")
+                            }
+                            IconButton(onClick = { showClearDialog = true }) {
+                                Icon(Icons.Default.DeleteSweep, "Clear vault")
+                            }
+                        }
+                        IconButton(onClick = {
+                            scope.launch {
+                                CsvExporter.exportAndShare(context, app.database.vaultDao())
+                            }
+                        }) {
+                            Icon(Icons.Default.Share, "Export CSV")
                         }
                     }
-                    IconButton(onClick = {
-                        scope.launch {
-                            CsvExporter.exportAndShare(context, app.database.vaultDao())
-                        }
-                    }) {
-                        Icon(Icons.Default.Share, "Export CSV")
+                )
+                if (purgeCount > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            "$purgeCount confirmed kills queued for purge",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
                     }
                 }
-            )
+            }
         }
     ) { padding ->
         if (entries.isEmpty()) {
@@ -220,6 +243,8 @@ fun VaultScreen(onBack: () -> Unit) {
                         onAllowSender = {
                             scope.launch {
                                 val normalized = Classifier.normalizeNumber(entry.sender)
+
+                                // Add to allowlist
                                 val already = app.database.ruleDao()
                                     .countByTypeAndValue(RuleType.ALLOWLIST_NUMBER, normalized)
                                 if (already == 0) {
@@ -230,35 +255,36 @@ fun VaultScreen(onBack: () -> Unit) {
                                         )
                                     )
                                 }
+
+                                // Remove from blocklist
+                                app.database.ruleDao().deleteFromBlocklist(normalized)
+
+                                // Remove ALL vault entries from this sender
+                                val removed = app.database.vaultDao()
+                                    .deleteAllBySenderUnscrubbed(entry.sender)
+
                                 withContext(Dispatchers.Main) {
-                                    showToast(
-                                        if (already == 0) "${entry.sender} added to allowlist"
-                                        else "${entry.sender} already on allowlist"
-                                    )
+                                    showToast("Allowed ${entry.sender} — removed $removed from vault")
                                 }
                             }
                         },
-                        onDeleteByKeyword = {
+                        onConfirmKillByKeyword = if (entry.reason != "BLOCKED_NUMBER") {
+                            {
+                                scope.launch {
+                                    val count = app.database.vaultDao()
+                                        .confirmByReasonAndRule(entry.reason, entry.matchedRule)
+                                    withContext(Dispatchers.Main) {
+                                        showToast("Confirmed $count as spam for ${entry.matchedRule}")
+                                    }
+                                }
+                            }
+                        } else null,
+                        onConfirmKillByNumber = {
                             scope.launch {
                                 val count = app.database.vaultDao()
-                                    .deleteByReasonAndRule(entry.reason, entry.matchedRule)
+                                    .confirmBySender(entry.sender)
                                 withContext(Dispatchers.Main) {
-                                    showToast("Deleted $count entries matching ${entry.reason}: ${entry.matchedRule}")
-                                }
-                            }
-                        },
-                        onDeleteByNumber = {
-                            scope.launch {
-                                val normalizedSender = Classifier.normalizeNumber(entry.sender)
-                                val allEntries = app.database.vaultDao().getAll()
-                                val matchingIds = allEntries
-                                    .filter { Classifier.normalizeNumber(it.sender) == normalizedSender }
-                                    .map { it.id }
-                                val count = if (matchingIds.isNotEmpty()) {
-                                    app.database.vaultDao().deleteByIds(matchingIds)
-                                } else 0
-                                withContext(Dispatchers.Main) {
-                                    showToast("Deleted $count entries from ${entry.sender}")
+                                    showToast("Confirmed $count as spam from ${entry.sender}")
                                 }
                             }
                         }
@@ -266,6 +292,37 @@ fun VaultScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showRestoreAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreAllDialog = false },
+            title = { Text("Restore All") },
+            text = {
+                Text(
+                    "Remove all ${entries.size} pending review items " +
+                        "and $purgeCount confirmed spam from the vault? " +
+                        "Messages stay in your SMS inbox untouched. " +
+                        "The vault will be cleared so you can start over."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val count = app.database.vaultDao().deleteAllPendingReview()
+                        showRestoreAllDialog = false
+                        showToast("Restored $count items — vault cleared")
+                    }
+                }) {
+                    Text("Restore All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreAllDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showClearDialog) {
@@ -302,8 +359,8 @@ private fun VaultItem(
     entry: VaultEntry,
     onRestore: () -> Unit,
     onAllowSender: () -> Unit,
-    onDeleteByKeyword: () -> Unit,
-    onDeleteByNumber: () -> Unit
+    onConfirmKillByKeyword: (() -> Unit)?,
+    onConfirmKillByNumber: () -> Unit
 ) {
     val dateFormat = remember {
         SimpleDateFormat("MMM d, yyyy  h:mm a", Locale.getDefault())
@@ -365,16 +422,30 @@ private fun VaultItem(
                 TextButton(onClick = onRestore) { Text("Restore") }
                 TextButton(onClick = onAllowSender) { Text("Allow Sender") }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+
+            if (onConfirmKillByKeyword != null) {
+                TextButton(
+                    onClick = onConfirmKillByKeyword,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "Confirm Kill: ${entry.matchedRule}",
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            TextButton(
+                onClick = onConfirmKillByNumber,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                TextButton(onClick = onDeleteByKeyword) {
-                    Text("Delete All: ${entry.matchedRule}", color = MaterialTheme.colorScheme.error)
-                }
-                TextButton(onClick = onDeleteByNumber) {
-                    Text("Delete All: ${entry.sender}", color = MaterialTheme.colorScheme.error)
-                }
+                Text(
+                    "Confirm Kill: ${entry.sender}",
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

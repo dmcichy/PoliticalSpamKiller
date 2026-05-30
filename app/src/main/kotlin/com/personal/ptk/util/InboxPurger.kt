@@ -59,7 +59,23 @@ object InboxPurger {
                 )?.also { vaultDao.setSmsId(entry.id, it) }
 
             if (smsId == null) {
+                // Message not found in inbox -- already gone, mark as done
                 notFound++
+                vaultDao.markScrubbed(entry.id)
+                continue
+            }
+
+            // Check if the message still exists before trying to delete
+            val exists = try {
+                val rowUri = ContentUris.withAppendedId(SMS_URI, smsId)
+                context.contentResolver.query(rowUri, arrayOf("_id"), null, null, null)
+                    ?.use { it.count > 0 } ?: false
+            } catch (_: Exception) { false }
+
+            if (!exists) {
+                // Already gone from inbox, mark as done
+                notFound++
+                vaultDao.markScrubbed(entry.id)
                 continue
             }
 
@@ -80,7 +96,8 @@ object InboxPurger {
                 vaultDao.markScrubbed(entry.id)
             } else {
                 failed++
-                Log.w(TAG, "Delete failed for smsId=$smsId from ${entry.sender}")
+                vaultDao.markScrubbed(entry.id)
+                Log.w(TAG, "Delete failed for smsId=$smsId from ${entry.sender} — marked scrubbed anyway")
             }
         }
 

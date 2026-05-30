@@ -4,8 +4,10 @@ object DefaultKeywords {
 
     val ALL: List<String> = listOf(
         // Voting / elections
-        "vote", "voter", "voted", "voting", "ballot", "polls", "poll",
-        "election", "campaign", "candidate", "filibuster", "impeach",
+        "political", "voter registration", "ballot measure", "election day",
+        "campaign trail", "filibuster", "impeach",
+        "reelect", "re-elect", "midterm election",
+        "electoral college",
 
         // Donation solicitation
         "donate", "donation", "donor", "chip in", "chipping in", "pitch in",
@@ -14,21 +16,30 @@ object DefaultKeywords {
         "2x match", "5x match", "10x match",
         "your contribution",
 
-        // Urgency / pressure tactics
-        "final notice", "urgent", "deadline", "midnight deadline", "fec deadline",
+        // Urgency / pressure tactics (political-specific only)
+        "midnight deadline", "fec deadline",
 
-        // Parties / movements
+        // Parties / movements / committees
         "gop", "dnc", "rnc", "maga", "democrat", "republican",
-        "liberal", "conservative",
+        "nrcc", "nrsc", "dccc", "dscc",
+        "super pac", "political action",
+        "red wave", "blue wave",
+        "tea party", "freedom caucus",
 
-        // Candidates (2024-2026 cycle — user-editable)
+        // Candidates / politicians (2024-2026 cycle)
         "trump", "biden", "harris", "vance", "walz", "desantis", "newsom",
+        "paxton", "cruz", "abbott", "mcconnell", "pelosi", "schumer",
+        "ocasio-cortez", "gaetz", "boebert",
+        "marjorie taylor greene",
 
         // Fundraising platforms
         "actblue", "winred", "anedot", "donorbox",
 
-        // Common spam phrases
-        "you in?", "are you with us", "stand with"
+        // Common political spam phrases (multi-word = safe)
+        "are you with us", "stand with",
+        "fight back", "take back", "save america",
+        "join the fight",
+        "signed the petition", "sign the petition"
     )
 
     val DONATION_INDICATORS: Set<String> = setOf(

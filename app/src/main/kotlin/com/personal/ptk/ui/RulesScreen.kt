@@ -57,8 +57,9 @@ fun RulesScreen(onBack: () -> Unit) {
     val tabs = listOf("Keywords", "Allowlist", "Blocklist")
     val ruleTypes = listOf(RuleType.KEYWORD, RuleType.ALLOWLIST_NUMBER, RuleType.BLOCKLIST_NUMBER)
 
-    val rules by app.database.ruleDao().getByTypeFlow(ruleTypes[selectedTab])
+    val rawRules by app.database.ruleDao().getByTypeFlow(ruleTypes[selectedTab])
         .collectAsState(initial = emptyList())
+    val rules = remember(rawRules) { rawRules.sortedBy { it.value.lowercase() } }
 
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -129,6 +130,12 @@ fun RulesScreen(onBack: () -> Unit) {
                             app.database.ruleDao().insert(
                                 RuleEntry(type = type, value = normalized)
                             )
+                            // Adding to blocklist removes from allowlist (and vice versa)
+                            if (type == RuleType.BLOCKLIST_NUMBER) {
+                                app.database.ruleDao().deleteFromAllowlist(normalized)
+                            } else if (type == RuleType.ALLOWLIST_NUMBER) {
+                                app.database.ruleDao().deleteFromBlocklist(normalized)
+                            }
                         } else {
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(

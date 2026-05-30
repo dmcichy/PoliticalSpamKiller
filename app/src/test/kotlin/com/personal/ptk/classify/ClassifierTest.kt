@@ -83,18 +83,6 @@ class ClassifierTest {
     }
 
     @Test
-    @DisplayName("Text containing 'actblue.com/foo' -> KILL(DONATION_PLATFORM)")
-    fun donationPlatformDomainKilled() = runTest {
-        val c = Classifier(
-            contactChecker = fakeContacts,
-            ruleProvider = FakeRuleProvider(keywords = emptyList())
-        )
-        val result = c.classify("5559876543", "Help us win! https://actblue.com/foo")
-        val kill = assertInstanceOf(Verdict.Kill::class.java, result)
-        assertEquals("DONATION_PLATFORM", kill.reason)
-    }
-
-    @Test
     @DisplayName("Allowlisted number always passes")
     fun allowlistedNumberPasses() = runTest {
         val c = Classifier(

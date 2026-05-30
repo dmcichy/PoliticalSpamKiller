@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
@@ -23,10 +26,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,9 +43,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.personal.ptk.App
 import java.text.NumberFormat
-import com.personal.ptk.util.KeywordSuggester
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -50,7 +56,10 @@ import java.util.Calendar
 fun MainScreen(
     onNavigateToRules: () -> Unit,
     onNavigateToVault: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onNavigateToAnalytics: () -> Unit = {},
+    onNavigateToKillLog: () -> Unit = {},
+    onNavigateToHelp: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as App
@@ -62,10 +71,9 @@ fun MainScreen(
     var killedToday by remember { mutableIntStateOf(0) }
     var killedWeek by remember { mutableIntStateOf(0) }
     var killedAll by remember { mutableIntStateOf(0) }
-    var suggestions by remember { mutableStateOf<List<String>>(emptyList()) }
+    val killedCount by app.database.vaultDao().countKilledFlow().collectAsState(initial = 0)
 
-    LaunchedEffect(Unit) {
-        val now = System.currentTimeMillis()
+    suspend fun refreshStats() {
         val todayStart = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -75,11 +83,19 @@ fun MainScreen(
         killedToday = app.database.vaultDao().countSince(todayStart)
         killedWeek = app.database.vaultDao().countSince(weekStart)
         killedAll = app.database.vaultDao().countAll()
+    }
 
-        val thirtyDaysAgo = now - 30L * 24 * 60 * 60 * 1000
-        val bodies = app.database.vaultDao().getBodiesSince(thirtyDaysAgo)
-        val activeKeywords = app.database.ruleDao().getAllActiveKeywords()
-        suggestions = KeywordSuggester.suggest(bodies, activeKeywords.toSet())
+    LaunchedEffect(Unit) { refreshStats() }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch { refreshStats() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(
@@ -87,6 +103,9 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("PoliticalTextKiller") },
                 actions = {
+                    IconButton(onClick = onNavigateToHelp) {
+                        Icon(Icons.AutoMirrored.Filled.HelpOutline, "Setup & Help")
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "Settings")
                     }
@@ -150,52 +169,8 @@ fun MainScreen(
                 StatCard("All Time", killedAll, Modifier.weight(1f))
             }
 
-            // Suggested keywords (v1.1)
-            if (suggestions.isNotEmpty()) {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "Suggested Keywords",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Frequently seen in killed messages but not yet in your keyword list:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        suggestions.take(5).forEach { word ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(word, style = MaterialTheme.typography.bodyLarge)
-                                TextButton(onClick = {
-                                    scope.launch {
-                                        val dao = app.database.ruleDao()
-                                        if (dao.countByTypeAndValue(
-                                                com.personal.ptk.data.entities.RuleType.KEYWORD, word
-                                            ) == 0
-                                        ) {
-                                            dao.insert(
-                                                com.personal.ptk.data.entities.RuleEntry(
-                                                    type = com.personal.ptk.data.entities.RuleType.KEYWORD,
-                                                    value = word
-                                                )
-                                            )
-                                            suggestions = suggestions - word
-                                        }
-                                    }
-                                }) {
-                                    Text("Add")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Consolidated inbox-cleaning surface
+            InboxCleanupCard(onNavigateToVault = onNavigateToVault)
 
             // Navigation buttons
             Row(
@@ -227,6 +202,47 @@ fun MainScreen(
                         Spacer(Modifier.height(8.dp))
                         Text("Vault", style = MaterialTheme.typography.titleSmall)
                     }
+                }
+                Card(
+                    onClick = onNavigateToAnalytics,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.Analytics, "Analytics")
+                        Spacer(Modifier.height(8.dp))
+                        Text("Inbox", style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+            }
+
+            // Kill Log: review/restore messages Power Mode deleted from the inbox
+            Card(
+                onClick = onNavigateToKillLog,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DeleteForever, "Kill Log")
+                        Spacer(Modifier.height(0.dp))
+                        Text(
+                            "  Kill Log",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                    Text(
+                        "$killedCount deleted",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

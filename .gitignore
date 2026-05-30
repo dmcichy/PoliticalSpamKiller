@@ -16,3 +16,20 @@ local.properties
 __pycache__/
 *.pyc
 ml/model_output/
+keystore/
+keystore.properties
+
+# Personal data / device dumps
+corrections.csv
+ptk_dump.bin
+smscap.txt
+*.xml.bak
+
+# Infrastructure docs with credentials
+dmc-inc.com/DMC-INC-INFRASTRUCTURE.md
+dmc-inc.com/*.pdf
+
+# ML training data (contains personal SMS content)
+ml-spam-training/data/
+ml-spam-training/*.csv
+ml-spam-training/review.html

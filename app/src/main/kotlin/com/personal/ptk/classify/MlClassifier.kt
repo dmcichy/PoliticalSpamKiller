@@ -34,7 +34,7 @@ class MlClassifier(private val context: Context) {
         if (!initialize()) return 0f
 
         val tokens = tokenize(text)
-        val input = Array(1) { tokens }
+        val input = Array(1) { FloatArray(maxLen) { tokens[it].toFloat() } }
         val output = Array(1) { FloatArray(1) }
 
         return try {
@@ -53,10 +53,13 @@ class MlClassifier(private val context: Context) {
     }
 
     private fun tokenize(text: String): IntArray {
-        val words = text.lowercase()
-            .replace(Regex("[^a-z0-9\\s]"), "")
-            .split(Regex("\\s+"))
-            .filter { it.isNotBlank() }
+        // Must match the Python tokenize() in step6_train.py exactly
+        val normalized = text.lowercase()
+            .replace(Regex("https?://\\S+"), " _URL_ ")
+            .replace(Regex("\\b\\d{10,}\\b"), " _PHONE_ ")
+            .replace(Regex("[^a-z_]"), " ")
+
+        val words = normalized.split(Regex("\\s+")).filter { it.isNotBlank() }
 
         val indices = IntArray(maxLen) // 0 = padding
         for (i in words.indices.take(maxLen)) {

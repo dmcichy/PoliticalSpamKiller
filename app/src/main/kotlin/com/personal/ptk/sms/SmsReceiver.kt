@@ -15,7 +15,6 @@ import com.personal.ptk.util.ShizukuHelper
 import com.personal.ptk.util.SmsRoleHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class SmsReceiver : BroadcastReceiver() {
@@ -69,27 +68,41 @@ class SmsReceiver : BroadcastReceiver() {
             val vaultDao = app.database.vaultDao()
 
             if (ShizukuHelper.isActive(app)) {
-                // Shizuku Power Mode: find the SMS ID and delete it silently
-                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                    val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
-                    val deleted = if (smsId != null) {
-                        ShizukuHelper.silentDeleteSms(smsId)
-                    } else false
-                    vaultDao.insert(
-                        VaultEntry(
-                            sender = sender,
-                            body = body,
-                            timestamp = timestamp,
-                            reason = verdict.reason,
-                            matchedRule = verdict.matchedRule,
-                            scrubbed = deleted,
-                            smsId = smsId
-                        )
+                // Shizuku Power Mode — two-phase approach:
+                //  Phase 1 (here): vault the entry BEFORE any role switching.
+                //    The role switch kills our process ("permissions revoked"),
+                //    so all DB work must finish first.
+                //  Phase 2 (fireAndForgetDelete): a self-contained shell script
+                //    launched via Shizuku that runs in Shizuku's own process,
+                //    independent of PTK's lifecycle. It handles:
+                //    role-switch → delete SMS → switch back → force-stop Messages.
+                val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
+
+                vaultDao.insert(
+                    VaultEntry(
+                        sender = sender,
+                        body = body,
+                        timestamp = timestamp,
+                        reason = verdict.reason,
+                        matchedRule = verdict.matchedRule,
+                        scrubbed = smsId != null,
+                        smsId = smsId
                     )
-                    Log.d(TAG, "Shizuku delete smsId=$smsId success=$deleted")
+                )
+                Log.d(TAG, "Power Mode: vaulted sender=$sender smsId=$smsId")
+
+                if (smsId != null) {
+                    val prevPkg = SmsRoleHelper.currentDefaultPackage(app)
+                        ?: "com.google.android.apps.messaging"
+                    ShizukuHelper.fireAndForgetDelete(
+                        app.packageName, prevPkg, smsId
+                    )
                 }
             } else {
-                // Standard mode: vault with scrubbed=false, poll for smsId in background
+                // Standard mode: vault first, then look up smsId in background.
+                // The vault insert is inline so it always completes.
+                val smsId = SmsLookup.findSmsId(app, sender, body, timestamp,
+                    maxAttempts = 3, delayMs = 300)
                 vaultDao.insert(
                     VaultEntry(
                         sender = sender,
@@ -98,21 +111,10 @@ class SmsReceiver : BroadcastReceiver() {
                         reason = verdict.reason,
                         matchedRule = verdict.matchedRule,
                         scrubbed = false,
-                        smsId = null
+                        smsId = smsId
                     )
                 )
-                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                    val smsId = SmsLookup.findSmsId(app, sender, body, timestamp)
-                    if (smsId != null) {
-                        val entry = vaultDao.getAll().firstOrNull {
-                            it.sender == sender && it.body == body && it.timestamp == timestamp
-                        }
-                        if (entry != null) {
-                            vaultDao.setSmsId(entry.id, smsId)
-                            Log.d(TAG, "Tagged vault entry ${entry.id} with smsId=$smsId")
-                        }
-                    }
-                }
+                Log.d(TAG, "Standard mode: vaulted sender=$sender smsId=$smsId")
             }
         }
     }

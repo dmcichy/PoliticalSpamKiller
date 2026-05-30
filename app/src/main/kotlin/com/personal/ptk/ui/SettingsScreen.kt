@@ -1,7 +1,5 @@
 package com.personal.ptk.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -19,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,29 +28,26 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.collectAsState
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.runtime.collectAsState
 import com.personal.ptk.App
-import com.personal.ptk.util.InboxPurger
-import com.personal.ptk.util.InboxScanner
+import com.personal.ptk.billing.SubscriptionState
 import com.personal.ptk.util.ShizukuHelper
 import com.personal.ptk.util.SmsRoleHelper
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,23 +58,13 @@ fun SettingsScreen(onBack: () -> Unit) {
     var mlEnabled by remember {
         mutableStateOf(app.prefs.getBoolean(App.PREF_ML_ENABLED, false))
     }
-    var nuclearMode by remember {
-        mutableStateOf(app.prefs.getBoolean(App.PREF_NUCLEAR_MODE, false))
+    var autoDelete by remember {
+        mutableStateOf(app.prefs.getBoolean(App.PREF_AUTO_DELETE, false))
     }
     var retentionDays by remember {
         mutableFloatStateOf(app.prefs.getInt(App.PREF_RETENTION_DAYS, 90).toFloat())
     }
-    var scanning by remember { mutableStateOf(false) }
-    var scanProgressText by remember { mutableStateOf<String?>(null) }
-    var scanResultText by remember { mutableStateOf<String?>(null) }
-    var purgeResultText by remember { mutableStateOf<String?>(null) }
-    var purgeProgressText by remember { mutableStateOf<String?>(null) }
-    var purging by remember { mutableStateOf(false) }
-    var pendingAction by remember { mutableStateOf<String?>(null) }
     var isDefault by remember { mutableStateOf(SmsRoleHelper.isDefaultSmsApp(context)) }
-    val pendingPurgeCount by app.database.vaultDao()
-        .countPendingPurgeFlow().collectAsState(initial = 0)
-    val scope = rememberCoroutineScope()
 
     var shizukuEnabled by remember {
         mutableStateOf(app.prefs.getBoolean(App.PREF_SHIZUKU_ENABLED, false))
@@ -89,6 +73,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var shizukuRunning by remember { mutableStateOf(ShizukuHelper.isRunning()) }
     var shizukuPermission by remember { mutableStateOf(ShizukuHelper.isPermissionGranted()) }
     val shizukuActive = shizukuEnabled && shizukuRunning && shizukuPermission
+
     var showAutoStartGuide by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -104,79 +89,6 @@ fun SettingsScreen(onBack: () -> Unit) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-
-    fun runScan() {
-        scanning = true
-        scanResultText = null
-        scanProgressText = null
-        scope.launch {
-            val doScan: suspend () -> Unit = {
-                val result = InboxScanner.scan(context) { current, total, killed ->
-                    scanProgressText = "Scanning $current of $total ($killed spam found)"
-                }
-                val sb = StringBuilder()
-                sb.append("Scanned ${result.scanned} messages. ")
-                sb.append("Found ${result.killed} spam. ")
-                if (result.deleted > 0) sb.append("Deleted ${result.deleted} from inbox. ")
-                if (result.deleteFailed > 0) sb.append("⚠ ${result.deleteFailed} failed to delete! ")
-                sb.append("Inbox: ${result.inboxAfter} remaining.")
-                scanResultText = sb.toString()
-            }
-            if (shizukuActive) {
-                ShizukuHelper.withPtkAsDefault(context) { doScan() }
-            } else {
-                doScan()
-            }
-            scanning = false
-            isDefault = SmsRoleHelper.isDefaultSmsApp(context)
-        }
-    }
-
-    fun runPurge() {
-        purging = true
-        purgeResultText = null
-        purgeProgressText = null
-        scope.launch {
-            val doPurge: suspend () -> Unit = {
-                val result = InboxPurger.purge(
-                    context,
-                    useShizuku = shizukuActive
-                ) { current, total ->
-                    purgeProgressText = "Purging $current of $total"
-                }
-                val sb = StringBuilder()
-                sb.append("Attempted ${result.attempted}. ")
-                sb.append("Deleted ${result.deleted}. ")
-                if (result.notFound > 0) sb.append("${result.notFound} not found. ")
-                if (result.failed > 0) sb.append("⚠ ${result.failed} failed. ")
-                sb.append("Inbox: ${result.inboxAfter} remaining.")
-                purgeResultText = sb.toString()
-            }
-            if (shizukuActive) {
-                ShizukuHelper.withPtkAsDefault(context) { doPurge() }
-            } else {
-                doPurge()
-            }
-            purging = false
-            isDefault = SmsRoleHelper.isDefaultSmsApp(context)
-        }
-    }
-
-    val smsRoleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        isDefault = SmsRoleHelper.isDefaultSmsApp(context)
-        val action = pendingAction
-        pendingAction = null
-        if (isDefault) {
-            when (action) {
-                "scan" -> runScan()
-                "purge" -> runPurge()
-            }
-        }
-    }
-
-    /* switchBack uses startActivity directly; lifecycle observer refreshes state on resume */
 
     Scaffold(
         topBar = {
@@ -200,26 +112,28 @@ fun SettingsScreen(onBack: () -> Unit) {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     SettingToggle(
-                        title = "ML Classifier",
-                        subtitle = "Use on-device machine learning model for enhanced detection. " +
-                            "Requires a trained model in app assets.",
-                        checked = mlEnabled,
+                        title = "Auto-delete detected spam (skip review)",
+                        subtitle = "When on, \"Scan Inbox\" deletes detected political " +
+                            "spam immediately instead of saving it to the Vault for " +
+                            "review. Leave off until you trust the classifier.",
+                        checked = autoDelete,
                         onCheckedChange = {
-                            mlEnabled = it
-                            app.prefs.edit().putBoolean(App.PREF_ML_ENABLED, it).apply()
+                            autoDelete = it
+                            app.prefs.edit().putBoolean(App.PREF_AUTO_DELETE, it).apply()
                         }
                     )
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
                     SettingToggle(
-                        title = "Nuclear Shortcode Mode",
-                        subtitle = "Kill ANY message from a non-contact 5-6 digit shortcode " +
-                            "that contains a dollar sign. Aggressive but effective.",
-                        checked = nuclearMode,
+                        title = "ML Classifier",
+                        subtitle = "On-device spam detection using a trained TFLite model. " +
+                            "Messages scoring >= 0.90 are flagged as political spam.",
+                        checked = mlEnabled,
+                        enabled = true,
                         onCheckedChange = {
-                            nuclearMode = it
-                            app.prefs.edit().putBoolean(App.PREF_NUCLEAR_MODE, it).apply()
+                            mlEnabled = it
+                            app.prefs.edit().putBoolean(App.PREF_ML_ENABLED, it).apply()
                         }
                     )
 
@@ -279,147 +193,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                         ) {
                             Text("Switch back to $prevLabel")
                         }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Scan Inbox", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        if (shizukuActive)
-                            "Classifies every SMS in your inbox and silently deletes " +
-                                "political spam via Shizuku. No app switching needed."
-                        else
-                            "Classifies every SMS already in your inbox and deletes the " +
-                                "political spam. PTK will temporarily become your default " +
-                                "SMS app (Android requires this to delete messages). " +
-                                "After the scan you can switch back to Google Messages above.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(12.dp))
-
-                    if (scanning) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.height(24.dp).padding(end = 12.dp)
-                            )
-                            Text(
-                                scanProgressText ?: "Starting scan...",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                if (shizukuActive || isDefault) {
-                                    runScan()
-                                } else {
-                                    pendingAction = "scan"
-                                    smsRoleLauncher.launch(
-                                        SmsRoleHelper.makePtkDefaultIntent(context)
-                                    )
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                when {
-                                    shizukuActive -> "Scan Inbox Now"
-                                    isDefault -> "Scan Inbox Now"
-                                    else -> "Switch to PTK & Scan Inbox"
-                                }
-                            )
-                        }
-                    }
-
-                    scanResultText?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (it.contains("⚠")) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "Purge Spam from Inbox",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        if (shizukuActive)
-                            "Silently deletes every recorded spam from your inbox " +
-                                "via Shizuku. No app switching needed."
-                        else
-                            "Every time PTK catches a spam SMS in real time, it records the " +
-                                "row ID. Tap to delete every recorded spam from your inbox in " +
-                                "one shot. PTK will become default temporarily.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Pending: $pendingPurgeCount message(s) flagged but still in inbox",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (pendingPurgeCount > 0)
-                            MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(12.dp))
-
-                    if (purging) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.height(24.dp).padding(end = 12.dp)
-                            )
-                            Text(
-                                purgeProgressText ?: "Starting purge...",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    } else {
-                        Button(
-                            onClick = {
-                                if (shizukuActive || isDefault) {
-                                    runPurge()
-                                } else {
-                                    pendingAction = "purge"
-                                    smsRoleLauncher.launch(
-                                        SmsRoleHelper.makePtkDefaultIntent(context)
-                                    )
-                                }
-                            },
-                            enabled = pendingPurgeCount > 0,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                when {
-                                    shizukuActive -> "Purge $pendingPurgeCount Spam Now"
-                                    isDefault -> "Purge $pendingPurgeCount Spam Now"
-                                    else -> "Switch to PTK & Purge $pendingPurgeCount Spam"
-                                }
-                            )
-                        }
-                    }
-
-                    purgeResultText?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (it.contains("⚠")) MaterialTheme.colorScheme.error
-                                else MaterialTheme.colorScheme.primary
-                        )
                     }
                 }
             }
@@ -570,16 +343,86 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
+            Spacer(Modifier.height(16.dp))
+
+            val subState by app.billingManager.state.collectAsState()
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Subscription", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(4.dp))
+                    val statusText = when (subState) {
+                        is SubscriptionState.Loading -> "Checking..."
+                        is SubscriptionState.Trial -> {
+                            val days = app.billingManager.trialDaysLeft()
+                            "Free trial — $days day${if (days != 1L) "s" else ""} remaining"
+                        }
+                        is SubscriptionState.Active -> "Active subscription"
+                        is SubscriptionState.Grace -> "Grace period — please update payment"
+                        is SubscriptionState.Expired -> "Expired — subscribe to continue"
+                    }
+                    Text(
+                        statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (subState) {
+                            is SubscriptionState.Active -> MaterialTheme.colorScheme.primary
+                            is SubscriptionState.Expired -> MaterialTheme.colorScheme.error
+                            is SubscriptionState.Grace -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(
+                                    "https://play.google.com/store/account/subscriptions" +
+                                        "?sku=ptk_monthly&package=com.personal.ptk"
+                                )
+                            )
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Manage Subscription")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Privacy Policy", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "All classification happens on-device. " +
+                            "No message content is ever transmitted.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(
+                                    "https://dmc-inc.com/privacy"
+                                )
+                            )
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("View Privacy Policy")
+                    }
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
 
             Text(
                 "PoliticalTextKiller v1.0.0",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-            Text(
-                "Personal use. No data leaves this device.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -593,7 +436,8 @@ private fun SettingToggle(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -607,6 +451,6 @@ private fun SettingToggle(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }

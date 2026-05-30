@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — PoliticalTextKiller</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #1a1a2e;
+            background: #f8f9fa;
+            line-height: 1.7;
+        }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #fff;
+            padding: 40px 20px;
+        }
+        header a { color: #a0b4d0; text-decoration: none; font-size: 0.9em; }
+        header a:hover { color: #fff; }
+        header h1 { font-size: 1.8em; margin-top: 8px; }
+        main { max-width: 700px; margin: 0 auto; padding: 40px 20px 80px; }
+        .date { color: #888; font-size: 0.9em; margin-bottom: 32px; }
+        h2 { font-size: 1.15em; margin-top: 32px; margin-bottom: 8px; color: #1a1a2e; }
+        p { margin-bottom: 16px; color: #333; }
+        strong { color: #1a1a2e; }
+        footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: #888;
+            font-size: 0.85em;
+            border-top: 1px solid #e5e5e5;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/">&larr; DMC Inc</a>
+        <h1>Privacy Policy</h1>
+    </header>
+    <main>
+        <p class="date">Effective date: May 30, 2026</p>
+
+        <p>PoliticalTextKiller ("the App") is developed and maintained by Dave Cichy / DMC Inc. This policy explains how the App handles your data.</p>
+
+        <h2>Data Collection</h2>
+        <p>The App does <strong>not</strong> collect, transmit, or store any personal data on external servers. All processing happens entirely on your device.</p>
+
+        <h2>SMS Access</h2>
+        <p>The App requests SMS permissions solely to scan, classify, and optionally delete political spam text messages from your inbox. Message content is analyzed on-device using keyword matching and a locally-running machine-learning model. No message content is ever sent to any server, API, or third party.</p>
+
+        <h2>Notification Access</h2>
+        <p>If granted, Notification Listener access is used to detect and dismiss notifications for messages classified as political spam. Notification data is not stored beyond the in-memory kill ring buffer (last 50 entries) used for the app's analytics display.</p>
+
+        <h2>Shizuku (Optional)</h2>
+        <p>The optional Shizuku integration allows the App to delete SMS messages silently without becoming the default SMS app. This uses a local privileged shell and does not transmit data off-device.</p>
+
+        <h2>Subscription Data</h2>
+        <p>Subscription purchases are handled entirely by Google Play Billing. The App receives a purchase token from Google Play to verify subscription status. No payment or billing details are accessible to the App or its developer.</p>
+
+        <h2>Analytics &amp; Crash Reporting</h2>
+        <p>The App does not include any analytics SDKs, crash reporting services, or advertising frameworks.</p>
+
+        <h2>Data Storage</h2>
+        <p>Classification rules, vault entries (quarantined messages), and kill-log records are stored in a local Room (SQLite) database on your device. This data is not backed up to the cloud unless you have enabled Android's device backup, which is controlled by your device settings.</p>
+
+        <h2>Third-Party Services</h2>
+        <p>The only third-party service the App communicates with is Google Play Billing for subscription management. No other network requests are made.</p>
+
+        <h2>Children</h2>
+        <p>The App is not directed at children under 13 and does not knowingly collect data from children.</p>
+
+        <h2>Changes</h2>
+        <p>This policy may be updated occasionally. The effective date at the top of this page will be revised accordingly.</p>
+
+        <h2>Contact</h2>
+        <p>Questions about this policy can be directed to: <strong>dcichy@dmc-inc.com</strong></p>
+    </main>
+    <footer>
+        &copy; 2026 DMC Inc. All rights reserved.
+    </footer>
+</body>
+</html>

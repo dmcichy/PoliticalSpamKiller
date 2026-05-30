@@ -17,5 +17,7 @@ data class VaultEntry(
     val matchedRule: String,
     val scrubbed: Boolean,
     /** Row ID in content://sms when known. Null until we can locate it. */
-    val smsId: Long? = null
+    val smsId: Long? = null,
+    /** True when user has approved this as spam (hides from vault review, still eligible for purge). */
+    val confirmed: Boolean = false
 )
