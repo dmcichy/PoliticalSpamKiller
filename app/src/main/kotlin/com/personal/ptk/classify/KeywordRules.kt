@@ -1,5 +1,7 @@
 package com.personal.ptk.classify
 
+import java.util.Locale
+
 object KeywordRules {
 
     private val URL_REGEX = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE)
@@ -8,23 +10,26 @@ object KeywordRules {
         if (body.isBlank() || keywords.isEmpty()) return null
 
         val normalized = collapseAndLower(body)
-        val words = tokenize(normalized)
-        val wordSet = words.toSet()
 
         for (keyword in keywords) {
-            val kw = keyword.lowercase().trim()
+            val kw = keyword.lowercase(Locale.ROOT).trim()
             if (kw.isBlank()) continue
 
             if (kw.contains(' ')) {
-                // Multi-word phrase: substring match on full body
-                if (normalized.contains(kw)) {
+                // Multi-word phrase: case-insensitive substring match on both the
+                // pre-lowercased normalized body AND the original body as a safety net,
+                // so unicode variants that survive lowercasing are still caught.
+                if (normalized.contains(kw, ignoreCase = true) ||
+                    body.contains(kw, ignoreCase = true)
+                ) {
                     return Verdict.Kill("KEYWORD", kw)
                 }
             } else {
-                // Single word: word-boundary match via regex
-                // This prevents "pac" from matching "package" or "poll" matching "Apollo"
-                val pattern = Regex("\\b${Regex.escape(kw)}\\b")
-                if (pattern.containsMatchIn(normalized)) {
+                // Leading \b prevents mid-word matches ("pac" won't hit "impact", "poll" won't
+                // hit "Apollo"). No trailing \b so plurals/suffixes still match: "lawmaker"
+                // catches "Lawmakers", "trump" catches "Trump's", etc.
+                val pattern = Regex("\\b${Regex.escape(kw)}", RegexOption.IGNORE_CASE)
+                if (pattern.containsMatchIn(normalized) || pattern.containsMatchIn(body)) {
                     return Verdict.Kill("KEYWORD", kw)
                 }
             }
@@ -40,9 +45,9 @@ object KeywordRules {
 
         if (urlDomains.isNotEmpty()) {
             for (keyword in keywords) {
-                val kw = keyword.lowercase().trim()
+                val kw = keyword.lowercase(Locale.ROOT).trim()
                 if (kw.isBlank()) continue
-                if (urlDomains.any { it.contains(kw) }) {
+                if (urlDomains.any { it.contains(kw, ignoreCase = true) }) {
                     return Verdict.Kill("KEYWORD_URL", kw)
                 }
             }
@@ -51,7 +56,7 @@ object KeywordRules {
         return null
     }
 
-    fun collapseAndLower(text: String): String = collapseAbbreviations(text.lowercase())
+    fun collapseAndLower(text: String): String = collapseAbbreviations(text.lowercase(Locale.ROOT))
 
     private fun collapseAbbreviations(text: String): String {
         var result = text

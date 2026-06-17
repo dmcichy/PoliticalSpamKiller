@@ -41,6 +41,7 @@ import com.personal.ptk.App
 import com.personal.ptk.classify.Classifier
 import com.personal.ptk.classify.DefaultKeywords
 import android.widget.Toast
+import java.util.Locale
 import com.personal.ptk.data.entities.RuleEntry
 import com.personal.ptk.data.entities.RuleType
 import kotlinx.coroutines.Dispatchers
@@ -121,7 +122,7 @@ fun RulesScreen(onBack: () -> Unit) {
                     val normalized = if (type != RuleType.KEYWORD) {
                         Classifier.normalizeNumber(value)
                     } else {
-                        value.lowercase().trim()
+                        value.lowercase(Locale.ROOT).trim()
                     }
                     if (normalized.isNotBlank()) {
                         val already = app.database.ruleDao()
